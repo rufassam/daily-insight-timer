@@ -118,22 +118,26 @@ def upload_to_r2(file_path):
 def send_email(video_url):
     print("📧 Sending email...")
 
+    sender = EMAIL_SENDER.strip()
+    receiver = EMAIL_RECEIVER.strip()
+    password = EMAIL_PASSWORD.strip()
+
     msg = EmailMessage()
     msg["Subject"] = "🎥 Daily Insight Timer Reel"
-    msg["From"] = EMAIL_SENDER
-    msg["To"] = EMAIL_RECEIVER
-    msg.set_content(
-        f"""Your daily reel is ready 🎉
+    msg["From"] = sender
+    msg["To"] = receiver
 
-Watch & download here:
-{video_url}
-
-Have a great day 🙏
-"""
+    body = (
+        "Your daily reel is ready 🎉\n\n"
+        "Watch & download here:\n"
+        f"{video_url}\n\n"
+        "Have a great day 🙏"
     )
 
+    msg.set_content(body)
+
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
-        smtp.login(EMAIL_SENDER, EMAIL_PASSWORD)
+        smtp.login(sender, password)
         smtp.send_message(msg)
 
     print("✅ Email sent!")
