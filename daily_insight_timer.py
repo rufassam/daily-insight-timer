@@ -36,6 +36,7 @@ R2_BUCKET = "ig-reels"
 # ============================================================
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PUBLIC_BASE_URL = f"https://{R2_BUCKET}.{R2_ACCOUNT_ID}.r2.dev"
 
 IMAGE_DIR = os.path.join(BASE_DIR, "images", "sleep")
 AUDIO_DIR = os.path.join(BASE_DIR, "audio", "sleep")
@@ -128,31 +129,22 @@ def create_reel():
 # UPLOAD TO R2 + PRESIGNED URL
 # ============================================================
 
-def upload_and_sign():
-    print("☁️ Uploading to R2...")
-
-    key = os.path.basename(OUTPUT_VIDEO)
+def upload_to_r2(filename):
+    print("☁️ Uploading to Cloudflare R2...")
 
     s3.upload_file(
-        OUTPUT_VIDEO,
+        filename,
         R2_BUCKET,
-        key,
-        ExtraArgs={"ContentType": "video/mp4"}
-    )
-
-    url = s3.generate_presigned_url(
-        "get_object",
-        Params={
-            "Bucket": R2_BUCKET,
-            "Key": key,
-            "ResponseContentType": "video/mp4",
-            "ResponseContentDisposition": f"inline; filename={key}",
+        filename,
+        ExtraArgs={
+            "ContentType": "video/mp4",
         },
-        ExpiresIn=86400,  # 24 hours
     )
 
-    print("🔗 Signed URL generated")
-    return url
+    public_url = f"{PUBLIC_BASE_URL}/{filename}"
+    print("🔗 Public URL:", public_url)
+
+    return public_url
 
 # ============================================================
 # CLEAN OLD REELS
@@ -219,11 +211,12 @@ Steps:
 
 def main():
     create_reel()
-    url = upload_and_sign()
-    caption = caption_for_today()
-    send_email(url, caption)
-    cleanup_old_reels()
-    print("🏁 Done")
+
+    video_url = upload_to_r2(OUTPUT_VIDEO)
+    caption = random.choice(CAPTIONS)
+
+    send_email(video_url, caption)
+
 
 if __name__ == "__main__":
     main()
