@@ -56,14 +56,14 @@ s3 = boto3.client(
 # =========================
 # 🎬 CREATE REEL
 # =========================
-
 def get_files(folder, extensions):
-    return [
-        os.path.join(folder, f)
-        for f in os.listdir(folder)
-        if os.path.isfile(os.path.join(folder, f))
-        and f.lower().endswith(extensions)
-    ]
+    matches = []
+    for root, _, files in os.walk(folder):
+        for f in files:
+            if f.lower().endswith(extensions):
+                matches.append(os.path.join(root, f))
+    return matches
+
 
 
 def create_reel():
