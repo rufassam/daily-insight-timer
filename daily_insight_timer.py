@@ -57,18 +57,34 @@ s3 = boto3.client(
 # 🎬 CREATE REEL
 # =========================
 
-def create_reel():
-    audio = random.choice(os.listdir(AUDIO_DIR))
-    image = random.choice(os.listdir(IMAGE_DIR))
+def get_files(folder, extensions):
+    return [
+        os.path.join(folder, f)
+        for f in os.listdir(folder)
+        if os.path.isfile(os.path.join(folder, f))
+        and f.lower().endswith(extensions)
+    ]
 
-    audio_path = os.path.join(AUDIO_DIR, audio)
-    image_path = os.path.join(IMAGE_DIR, image)
+
+def create_reel():
+    image_files = get_files(IMAGE_DIR, (".jpg", ".jpeg", ".png"))
+    audio_files = get_files(AUDIO_DIR, (".mp3", ".wav", ".m4a"))
+
+    if not image_files:
+        raise RuntimeError("❌ No image files found in images/")
+    if not audio_files:
+        raise RuntimeError("❌ No audio files found in audio/")
+
+    image_path = random.choice(image_files)
+    audio_path = random.choice(audio_files)
 
     today = datetime.utcnow().strftime("%Y-%m-%d")
     output_file = f"reel_{today}.mp4"
     output_path = os.path.join(OUTPUT_DIR, output_file)
 
     print("🎬 Creating reel...")
+    print(f"🖼 Image: {image_path}")
+    print(f"🎧 Audio: {audio_path}")
 
     cmd = [
         "ffmpeg",
@@ -86,6 +102,7 @@ def create_reel():
 
     subprocess.run(cmd, check=True)
     return output_path
+
 
 # =========================
 # ☁️ UPLOAD TO R2
