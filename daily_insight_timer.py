@@ -129,13 +129,17 @@ def create_reel():
 # UPLOAD TO R2 + PRESIGNED URL
 # ============================================================
 
-def upload_to_r2(filename):
+import os
+
+def upload_to_r2(local_path):
     print("☁️ Uploading to Cloudflare R2...")
 
+    filename = os.path.basename(local_path)  # 🔑 THIS IS THE FIX
+
     s3.upload_file(
-        filename,
+        local_path,          # local file on GitHub runner
         R2_BUCKET,
-        filename,
+        filename,            # R2 object key (clean!)
         ExtraArgs={
             "ContentType": "video/mp4",
         },
@@ -145,6 +149,7 @@ def upload_to_r2(filename):
     print("🔗 Public URL:", public_url)
 
     return public_url
+
 
 # ============================================================
 # CLEAN OLD REELS
@@ -211,11 +216,10 @@ Steps:
 
 def main():
     create_reel()
-
     video_url = upload_to_r2(OUTPUT_VIDEO)
     caption = random.choice(CAPTIONS)
-
     send_email(video_url, caption)
+
 
 
 if __name__ == "__main__":
