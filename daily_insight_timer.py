@@ -86,31 +86,46 @@ def create_reel():
     return output_path
 
 
+from boto3.s3.transfer import TransferConfig
+import boto3
+import os
+
 def upload_to_r2(file_path):
     print("☁️ Uploading to R2...")
 
     s3 = boto3.client(
         "s3",
-        endpoint_url=f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com",
+        endpoint_url=R2_ENDPOINT,
         aws_access_key_id=R2_ACCESS_KEY,
         aws_secret_access_key=R2_SECRET_KEY,
         region_name="auto",
+        config=boto3.session.Config(
+            signature_version="s3v4"
+        ),
     )
 
-    key = os.path.basename(file_path)
+    filename = os.path.basename(file_path)
+    object_key = f"reel_{TODAY}.mp4"
+
+    # 🚫 Disable multipart uploads (CRITICAL FIX)
+    config = TransferConfig(
+        multipart_threshold=1024 * 1024 * 1024,  # 1 GB
+        multipart_chunksize=1024 * 1024 * 1024,
+        use_threads=False,
+    )
 
     s3.upload_file(
         file_path,
-        R2_BUCKET_NAME,
-        key,
+        R2_BUCKET,
+        object_key,
         ExtraArgs={
             "ContentType": "video/mp4",
-            "ContentDisposition": f'inline; filename="{key}"',
         },
+        Config=config,
     )
 
-    public_url = f"{PUBLIC_BASE_URL}/{key}"
-    print("🌍 Public URL:", public_url)
+    public_url = f"{R2_PUBLIC_BASE}/{object_key}"
+    print(f"✅ Uploaded to R2: {public_url}")
 
     return public_url
 
