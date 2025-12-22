@@ -21,13 +21,13 @@ from email.utils import formatdate
 # 🔐 SECRETS (FROM GITHUB ACTIONS)
 # ============================================================
 
-EMAIL_SENDER = os.environ["EMAIL_SENDER"]
-EMAIL_PASSWORD = os.environ["EMAIL_PASSWORD"]
-EMAIL_RECEIVER = os.environ["EMAIL_RECEIVER"]
+EMAIL_SENDER = os.environ["EMAIL_SENDER"].strip()
+EMAIL_PASSWORD = os.environ["EMAIL_PASSWORD"].strip()
+EMAIL_RECEIVER = os.environ["EMAIL_RECEIVER"].strip()
 
-R2_ACCOUNT_ID = os.environ["R2_ACCOUNT_ID"]
-R2_ACCESS_KEY = os.environ["R2_ACCESS_KEY"]
-R2_SECRET_KEY = os.environ["R2_SECRET_KEY"]
+R2_ACCOUNT_ID = os.environ["R2_ACCOUNT_ID"].strip()
+R2_ACCESS_KEY = os.environ["R2_ACCESS_KEY"].strip()
+R2_SECRET_KEY = os.environ["R2_SECRET_KEY"].strip()
 
 R2_BUCKET = "ig-reels"
 
