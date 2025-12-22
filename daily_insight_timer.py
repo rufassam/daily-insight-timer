@@ -8,157 +8,150 @@ Created on Sat Dec 20 13:39:15 2025
 
 import os
 import random
-import smtplib
 import subprocess
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from datetime import datetime
-
+import datetime
+import smtplib
+from email.message import EmailMessage
 import boto3
 
 # =========================
-# 🔐 CONFIG — EDIT THESE
+# CONFIG — UPDATE THESE
 # =========================
 
 # Email
-EMAIL_SENDER = "rufassam@gmail.com"
-EMAIL_PASSWORD = "YOUR_GMAIL_APP_PASSWORD"
-EMAIL_RECEIVER = "rufassam@gmail.com"
+EMAIL_SENDER = os.environ["EMAIL_SENDER"]
+EMAIL_PASSWORD = os.environ["EMAIL_PASSWORD"]
+EMAIL_RECEIVER = os.environ["EMAIL_RECEIVER"]
 
 # Cloudflare R2
-R2_ACCOUNT_ID = "6f497117b8dcc2118de21a1443d527cd"
-R2_ACCESS_KEY = "YOUR_R2_ACCESS_KEY"
-R2_SECRET_KEY = "YOUR_R2_SECRET_KEY"
-R2_BUCKET = "ig-reels"
+R2_ACCOUNT_ID = os.environ["R2_ACCOUNT_ID"]
+R2_ACCESS_KEY = os.environ["R2_ACCESS_KEY"]
+R2_SECRET_KEY = os.environ["R2_SECRET_KEY"]
+R2_BUCKET_NAME = "ig-reels"
 
-# Public R2 base URL (from Cloudflare dashboard)
-PUBLIC_R2_BASE_URL = "https://pub-03f0b7ece4e434f8a4e7c40b7bf2c7b.r2.dev"
+# Public Worker base URL (IMPORTANT)
+PUBLIC_BASE_URL = "https://ig-reels-public.rufassam.workers.dev"
 
-# Media folders (inside repo)
+# Media folders (relative paths in repo)
+IMAGES_DIR = "images"
 AUDIO_DIR = "audio"
-IMAGE_DIR = "images"
 OUTPUT_DIR = "output"
 
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
 # =========================
-# ☁️ R2 CLIENT
+# HELPERS
 # =========================
 
-s3 = boto3.client(
-    "s3",
-    endpoint_url=f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com",
-    aws_access_key_id=R2_ACCESS_KEY,
-    aws_secret_access_key=R2_SECRET_KEY,
-    region_name="auto",
-)
-
-# =========================
-# 🎬 CREATE REEL
-# =========================
-def get_files(folder, extensions):
-    matches = []
-    for root, _, files in os.walk(folder):
-        for f in files:
+def get_random_file(root_dir, extensions):
+    files = []
+    for root, _, filenames in os.walk(root_dir):
+        for f in filenames:
             if f.lower().endswith(extensions):
-                matches.append(os.path.join(root, f))
-    return matches
+                files.append(os.path.join(root, f))
 
+    if not files:
+        raise RuntimeError(f"❌ No valid files found in {root_dir}")
+
+    return random.choice(files)
 
 
 def create_reel():
-    image_files = get_files(IMAGE_DIR, (".jpg", ".jpeg", ".png"))
-    audio_files = get_files(AUDIO_DIR, (".mp3", ".wav", ".m4a"))
-
-    if not image_files:
-        raise RuntimeError("❌ No image files found in images/")
-    if not audio_files:
-        raise RuntimeError("❌ No audio files found in audio/")
-
-    image_path = random.choice(image_files)
-    audio_path = random.choice(audio_files)
-
-    today = datetime.utcnow().strftime("%Y-%m-%d")
-    output_file = f"reel_{today}.mp4"
-    output_path = os.path.join(OUTPUT_DIR, output_file)
-
     print("🎬 Creating reel...")
-    print(f"🖼 Image: {image_path}")
-    print(f"🎧 Audio: {audio_path}")
+
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    image = get_random_file(IMAGES_DIR, (".jpg", ".jpeg", ".png"))
+    audio = get_random_file(AUDIO_DIR, (".mp3", ".wav", ".m4a"))
+
+    today = datetime.date.today().isoformat()
+    output_path = f"{OUTPUT_DIR}/reel_{today}.mp4"
 
     cmd = [
         "ffmpeg",
         "-y",
         "-loop", "1",
-        "-i", image_path,
-        "-i", audio_path,
+        "-i", image,
+        "-i", audio,
+        "-vf", "scale=1080:1920,format=yuv420p",
         "-c:v", "libx264",
+        "-preset", "veryfast",
         "-c:a", "aac",
         "-b:a", "192k",
         "-shortest",
-        "-pix_fmt", "yuv420p",
         output_path,
     ]
 
     subprocess.run(cmd, check=True)
+    print("✅ Reel created:", output_path)
+
     return output_path
 
 
-# =========================
-# ☁️ UPLOAD TO R2
-# =========================
-
 def upload_to_r2(file_path):
-    object_name = os.path.basename(file_path)
+    print("☁️ Uploading to R2...")
 
-    print(f"☁️ Uploading {object_name} to R2...")
+    s3 = boto3.client(
+        "s3",
+        endpoint_url=f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com",
+        aws_access_key_id=R2_ACCESS_KEY,
+        aws_secret_access_key=R2_SECRET_KEY,
+        region_name="auto",
+    )
+
+    key = os.path.basename(file_path)
 
     s3.upload_file(
         file_path,
-        R2_BUCKET,
-        object_name,
-        ExtraArgs={"ContentType": "video/mp4"},
+        R2_BUCKET_NAME,
+        key,
+        ExtraArgs={
+            "ContentType": "video/mp4",
+            "ContentDisposition": f'inline; filename="{key}"',
+        },
     )
 
-    public_url = f"{PUBLIC_R2_BASE_URL}/{object_name}"
+    public_url = f"{PUBLIC_BASE_URL}/{key}"
+    print("🌍 Public URL:", public_url)
+
     return public_url
 
-# =========================
-# 📧 SEND EMAIL
-# =========================
 
 def send_email(video_url):
-    subject = "🎧 Daily Insight Timer Reel"
-    body = f"""
-Your daily reel is ready 🎬
+    print("📧 Sending email...")
 
-👉 Download / Watch:
-{video_url}
-
-Have a beautiful day 🌿
-"""
-
-    msg = MIMEMultipart()
+    msg = EmailMessage()
+    msg["Subject"] = "🎥 Daily Insight Timer Reel"
     msg["From"] = EMAIL_SENDER
     msg["To"] = EMAIL_RECEIVER
-    msg["Subject"] = subject
-    msg.attach(MIMEText(body, "plain"))
+    msg.set_content(
+        f"""Your daily reel is ready 🎉
 
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(EMAIL_SENDER, EMAIL_PASSWORD)
-        server.send_message(msg)
+Watch & download here:
+{video_url}
 
-    print("📧 Email sent")
+Have a great day 🙏
+"""
+    )
 
-# =========================
-# 🚀 MAIN
-# =========================
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+        smtp.login(EMAIL_SENDER, EMAIL_PASSWORD)
+        smtp.send_message(msg)
+
+    print("✅ Email sent!")
+
+
+def cleanup_local_files():
+    if os.path.exists(OUTPUT_DIR):
+        for f in os.listdir(OUTPUT_DIR):
+            os.remove(os.path.join(OUTPUT_DIR, f))
+        print("🧹 Local cleanup done")
+
 
 def main():
     video_path = create_reel()
-    video_url = upload_to_r2(video_path)
-    send_email(video_url)
+    public_url = upload_to_r2(video_path)
+    send_email(public_url)
+    cleanup_local_files()
+
 
 if __name__ == "__main__":
     main()
-
