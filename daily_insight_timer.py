@@ -189,11 +189,14 @@ def main():
     video_path = create_reel()
     public_url = upload_to_r2(video_path)
 
-    caption = generate_ai_caption()
-    print("🧠 AI Caption:", caption)
+    try:
+        caption = generate_ai_caption()
+    except Exception as e:
+        print("⚠️ Caption generation failed:", e)
+        caption = "Take a deep breath and allow this moment of calm to settle in. 🌿"
 
     send_email(public_url, caption)
-    cleanup_local_files()
+    cleanup()
 
 
 
