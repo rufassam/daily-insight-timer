@@ -184,6 +184,11 @@ Have a peaceful day 🙏
 
     print("✅ Email sent!")
 
+def cleanup():
+    if os.path.exists(OUTPUT_DIR):
+        for f in os.listdir(OUTPUT_DIR):
+            os.remove(os.path.join(OUTPUT_DIR, f))
+        print("🧹 Cleanup done")
 
 def main():
     video_path = create_reel()
