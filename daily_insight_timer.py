@@ -14,7 +14,6 @@ import smtplib
 from email.message import EmailMessage
 import boto3
 from boto3.s3.transfer import TransferConfig
-import openai
 from openai import OpenAI
 
 # =========================
@@ -62,26 +61,33 @@ def get_random_file(root_dir, extensions):
 
     return random.choice(files)
 
-def generate_ai_caption():
-    openai.api_key = os.environ["OPENAI_API_KEY"].strip()
 
-    prompt = (
-        "Write a short, calming caption for a meditation or sleep music video. "
-        "Tone should be peaceful, spiritual, and gentle. "
-        "No hashtags. No emojis. Max 2 sentences."
+
+def generate_ai_caption():
+    print("🧠 Generating AI caption...")
+
+    client = OpenAI(
+        api_key=os.environ["OPENAI_API_KEY"].strip()
     )
 
-    response = openai.ChatCompletion.create(
+    prompt = (
+        "Write a calm, soothing Instagram caption for a meditation or relaxation video. "
+        "Keep it short, peaceful, and inspiring. Add 2–3 relevant hashtags."
+    )
+
+    response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": "You write captions for mindfulness and meditation music."},
-            {"role": "user", "content": prompt},
+            {"role": "system", "content": "You are a mindfulness and meditation content creator."},
+            {"role": "user", "content": prompt}
         ],
-        max_tokens=60,
         temperature=0.7,
+        max_tokens=80,
     )
 
     caption = response.choices[0].message.content.strip()
+    print("✅ Caption generated")
+
     return caption
 
 
