@@ -14,6 +14,7 @@ import smtplib
 from email.message import EmailMessage
 import boto3
 from boto3.s3.transfer import TransferConfig
+import openai
 
 # =========================
 # CONFIG — ENV VARS
@@ -59,6 +60,28 @@ def get_random_file(root_dir, extensions):
         raise RuntimeError(f"❌ No valid files found in {root_dir}")
 
     return random.choice(files)
+
+def generate_ai_caption():
+    openai.api_key = os.environ["OPENAI_API_KEY"].strip()
+
+    prompt = (
+        "Write a short, calming caption for a meditation or sleep music video. "
+        "Tone should be peaceful, spiritual, and gentle. "
+        "No hashtags. No emojis. Max 2 sentences."
+    )
+
+    response = openai.ChatCompletion.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "You write captions for mindfulness and meditation music."},
+            {"role": "user", "content": prompt},
+        ],
+        max_tokens=60,
+        temperature=0.7,
+    )
+
+    caption = response.choices[0].message.content.strip()
+    return caption
 
 
 def create_reel():
@@ -127,7 +150,7 @@ def upload_to_r2(file_path):
     return public_url
 
 
-def send_email(video_url):
+def send_email(video_url, caption):
     print("📧 Sending email...")
 
     msg = EmailMessage()
@@ -138,10 +161,13 @@ def send_email(video_url):
     msg.set_content(
         f"""Your daily reel is ready 🎉
 
-Watch & download here:
+🎬 Video:
 {video_url}
 
-Have a great day 🙏
+📝 AI Caption:
+{caption}
+
+Have a peaceful day 🙏
 """
     )
 
@@ -152,18 +178,16 @@ Have a great day 🙏
     print("✅ Email sent!")
 
 
-def cleanup_local_files():
-    if os.path.exists(OUTPUT_DIR):
-        for f in os.listdir(OUTPUT_DIR):
-            os.remove(os.path.join(OUTPUT_DIR, f))
-        print("🧹 Local cleanup done")
-
-
 def main():
     video_path = create_reel()
     public_url = upload_to_r2(video_path)
-    send_email(public_url)
+
+    caption = generate_ai_caption()
+    print("🧠 AI Caption:", caption)
+
+    send_email(public_url, caption)
     cleanup_local_files()
+
 
 
 if __name__ == "__main__":
