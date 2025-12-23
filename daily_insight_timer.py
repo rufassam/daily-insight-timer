@@ -13,29 +13,36 @@ import datetime
 import smtplib
 from email.message import EmailMessage
 import boto3
+from boto3.s3.transfer import TransferConfig
 
 # =========================
-# CONFIG — UPDATE THESE
+# CONFIG — ENV VARS
 # =========================
 
 # Email
-EMAIL_SENDER = os.environ["EMAIL_SENDER"]
-EMAIL_PASSWORD = os.environ["EMAIL_PASSWORD"]
-EMAIL_RECEIVER = os.environ["EMAIL_RECEIVER"]
+EMAIL_SENDER = os.environ["EMAIL_SENDER"].strip()
+EMAIL_PASSWORD = os.environ["EMAIL_PASSWORD"].strip()
+EMAIL_RECEIVER = os.environ["EMAIL_RECEIVER"].strip()
 
 # Cloudflare R2
-R2_ACCOUNT_ID = os.environ["R2_ACCOUNT_ID"]
-R2_ACCESS_KEY = os.environ["R2_ACCESS_KEY"]
-R2_SECRET_KEY = os.environ["R2_SECRET_KEY"]
-R2_BUCKET_NAME = "ig-reels"
+R2_ACCOUNT_ID = os.environ["R2_ACCOUNT_ID"].strip()
+R2_ACCESS_KEY = os.environ["R2_ACCESS_KEY"].strip()
+R2_SECRET_KEY = os.environ["R2_SECRET_KEY"].strip()
 
-# Public Worker base URL (IMPORTANT)
-PUBLIC_BASE_URL = "https://ig-reels-public.rufassam.workers.dev"
+R2_BUCKET = "ig-reels"
 
-# Media folders (relative paths in repo)
+# R2 endpoint (REQUIRED)
+R2_ENDPOINT = f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+
+# Public Worker URL (WORKING)
+R2_PUBLIC_BASE = "https://ig-reels-public.rufassam.workers.dev"
+
+# Media folders
 IMAGES_DIR = "images"
 AUDIO_DIR = "audio"
 OUTPUT_DIR = "output"
+
+TODAY = datetime.date.today().isoformat()
 
 # =========================
 # HELPERS
@@ -62,8 +69,7 @@ def create_reel():
     image = get_random_file(IMAGES_DIR, (".jpg", ".jpeg", ".png"))
     audio = get_random_file(AUDIO_DIR, (".mp3", ".wav", ".m4a"))
 
-    today = datetime.date.today().isoformat()
-    output_path = f"{OUTPUT_DIR}/reel_{today}.mp4"
+    output_path = f"{OUTPUT_DIR}/reel_{TODAY}.mp4"
 
     cmd = [
         "ffmpeg",
@@ -86,10 +92,6 @@ def create_reel():
     return output_path
 
 
-from boto3.s3.transfer import TransferConfig
-import boto3
-import os
-
 def upload_to_r2(file_path):
     print("☁️ Uploading to R2...")
 
@@ -99,17 +101,14 @@ def upload_to_r2(file_path):
         aws_access_key_id=R2_ACCESS_KEY,
         aws_secret_access_key=R2_SECRET_KEY,
         region_name="auto",
-        config=boto3.session.Config(
-            signature_version="s3v4"
-        ),
+        config=boto3.session.Config(signature_version="s3v4"),
     )
 
-    filename = os.path.basename(file_path)
     object_key = f"reel_{TODAY}.mp4"
 
-    # 🚫 Disable multipart uploads (CRITICAL FIX)
+    # 🚫 Disable multipart uploads (R2 FIX)
     config = TransferConfig(
-        multipart_threshold=1024 * 1024 * 1024,  # 1 GB
+        multipart_threshold=1024 * 1024 * 1024,
         multipart_chunksize=1024 * 1024 * 1024,
         use_threads=False,
     )
@@ -118,14 +117,12 @@ def upload_to_r2(file_path):
         file_path,
         R2_BUCKET,
         object_key,
-        ExtraArgs={
-            "ContentType": "video/mp4",
-        },
+        ExtraArgs={"ContentType": "video/mp4"},
         Config=config,
     )
 
     public_url = f"{R2_PUBLIC_BASE}/{object_key}"
-    print(f"✅ Uploaded to R2: {public_url}")
+    print("✅ Uploaded:", public_url)
 
     return public_url
 
@@ -133,26 +130,23 @@ def upload_to_r2(file_path):
 def send_email(video_url):
     print("📧 Sending email...")
 
-    sender = EMAIL_SENDER.strip()
-    receiver = EMAIL_RECEIVER.strip()
-    password = EMAIL_PASSWORD.strip()
-
     msg = EmailMessage()
     msg["Subject"] = "🎥 Daily Insight Timer Reel"
-    msg["From"] = sender
-    msg["To"] = receiver
+    msg["From"] = EMAIL_SENDER
+    msg["To"] = EMAIL_RECEIVER
 
-    body = (
-        "Your daily reel is ready 🎉\n\n"
-        "Watch & download here:\n"
-        f"{video_url}\n\n"
-        "Have a great day 🙏"
+    msg.set_content(
+        f"""Your daily reel is ready 🎉
+
+Watch & download here:
+{video_url}
+
+Have a great day 🙏
+"""
     )
 
-    msg.set_content(body)
-
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
-        smtp.login(sender, password)
+        smtp.login(EMAIL_SENDER, EMAIL_PASSWORD)
         smtp.send_message(msg)
 
     print("✅ Email sent!")
