@@ -36,7 +36,7 @@ R2_BUCKET = "ig-reels"
 R2_ENDPOINT = f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
 
 # Public Worker URL (WORKING)
-R2_PUBLIC_BASE = "https://ig-reels-public.rufassam.workers.dev"
+R2_PUBLIC_BASE = f"https://pub-{R2_ACCOUNT_ID}.r2.dev/{R2_BUCKET}"
 
 # Media folders
 IMAGES_DIR = "images"
@@ -127,7 +127,7 @@ def upload_to_r2(file_path):
 
     s3 = boto3.client(
         "s3",
-        endpoint_url=R2_ENDPOINT,
+        endpoint_url=f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com",
         aws_access_key_id=R2_ACCESS_KEY,
         aws_secret_access_key=R2_SECRET_KEY,
         region_name="auto",
@@ -136,7 +136,6 @@ def upload_to_r2(file_path):
 
     object_key = f"reel_{TODAY}.mp4"
 
-    # 🚫 Disable multipart uploads (R2 FIX)
     config = TransferConfig(
         multipart_threshold=1024 * 1024 * 1024,
         multipart_chunksize=1024 * 1024 * 1024,
@@ -151,9 +150,9 @@ def upload_to_r2(file_path):
         Config=config,
     )
 
-    public_url = f"{R2_PUBLIC_BASE}/{object_key}"
-    print("✅ Uploaded:", public_url)
+    public_url = f"https://pub-{R2_ACCOUNT_ID}.r2.dev/{R2_BUCKET}/{object_key}"
 
+    print("✅ Uploaded:", public_url)
     return public_url
 
 
