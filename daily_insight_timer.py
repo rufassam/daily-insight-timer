@@ -14,7 +14,6 @@ import smtplib
 from email.message import EmailMessage
 import boto3
 from boto3.s3.transfer import TransferConfig
-from openai import OpenAI
 
 # =========================
 # CONFIG — ENV VARS
@@ -36,7 +35,7 @@ R2_BUCKET = "ig-reels"
 R2_ENDPOINT = f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
 
 # Public Worker URL (WORKING)
-R2_PUBLIC_BASE = f"https://pub-{R2_ACCOUNT_ID}.r2.dev/{R2_BUCKET}"
+R2_PUBLIC_BASE = "https://ig-reels-public.rufassam.workers.dev"
 
 # Media folders
 IMAGES_DIR = "images"
@@ -60,35 +59,6 @@ def get_random_file(root_dir, extensions):
         raise RuntimeError(f"❌ No valid files found in {root_dir}")
 
     return random.choice(files)
-
-
-
-def generate_ai_caption():
-    print("🧠 Generating AI caption...")
-
-    client = OpenAI(
-        api_key=os.environ["OPENAI_API_KEY"].strip()
-    )
-
-    prompt = (
-        "Write a calm, soothing Instagram caption for a meditation or relaxation video. "
-        "Keep it short, peaceful, and inspiring. Add 2–3 relevant hashtags."
-    )
-
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "You are a mindfulness and meditation content creator."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.7,
-        max_tokens=80,
-    )
-
-    caption = response.choices[0].message.content.strip()
-    print("✅ Caption generated")
-
-    return caption
 
 
 def create_reel():
@@ -127,7 +97,7 @@ def upload_to_r2(file_path):
 
     s3 = boto3.client(
         "s3",
-        endpoint_url=f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com",
+        endpoint_url=R2_ENDPOINT,
         aws_access_key_id=R2_ACCESS_KEY,
         aws_secret_access_key=R2_SECRET_KEY,
         region_name="auto",
@@ -136,6 +106,7 @@ def upload_to_r2(file_path):
 
     object_key = f"reel_{TODAY}.mp4"
 
+    # 🚫 Disable multipart uploads (R2 FIX)
     config = TransferConfig(
         multipart_threshold=1024 * 1024 * 1024,
         multipart_chunksize=1024 * 1024 * 1024,
@@ -150,13 +121,13 @@ def upload_to_r2(file_path):
         Config=config,
     )
 
-    public_url = f"https://pub-{R2_ACCOUNT_ID}.r2.dev/{R2_BUCKET}/{object_key}"
-
+    public_url = f"{R2_PUBLIC_BASE}/{object_key}"
     print("✅ Uploaded:", public_url)
+
     return public_url
 
 
-def send_email(video_url, caption):
+def send_email(video_url):
     print("📧 Sending email...")
 
     msg = EmailMessage()
@@ -167,13 +138,10 @@ def send_email(video_url, caption):
     msg.set_content(
         f"""Your daily reel is ready 🎉
 
-🎬 Video:
+Watch & download here:
 {video_url}
 
-📝 AI Caption:
-{caption}
-
-Have a peaceful day 🙏
+Have a great day 🙏
 """
     )
 
@@ -183,25 +151,19 @@ Have a peaceful day 🙏
 
     print("✅ Email sent!")
 
-def cleanup():
+
+def cleanup_local_files():
     if os.path.exists(OUTPUT_DIR):
         for f in os.listdir(OUTPUT_DIR):
             os.remove(os.path.join(OUTPUT_DIR, f))
-        print("🧹 Cleanup done")
+        print("🧹 Local cleanup done")
+
 
 def main():
     video_path = create_reel()
     public_url = upload_to_r2(video_path)
-
-    try:
-        caption = generate_ai_caption()
-    except Exception as e:
-        print("⚠️ Caption generation failed:", e)
-        caption = "Take a deep breath and allow this moment of calm to settle in. 🌿"
-
-    send_email(public_url, caption)
-    cleanup()
-
+    send_email(public_url)
+    cleanup_local_files()
 
 
 if __name__ == "__main__":
