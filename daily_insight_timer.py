@@ -35,7 +35,7 @@ R2_BUCKET = "ig-reels"
 R2_ENDPOINT = f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
 
 # Public Worker URL (WORKING)
-R2_PUBLIC_BASE = "https://ig-reels-public.rufassam.workers.dev"
+R2_PUBLIC_BASE = f"https://pub-{R2_ACCOUNT_ID}.r2.dev"
 
 # Media folders
 IMAGES_DIR = "images"
