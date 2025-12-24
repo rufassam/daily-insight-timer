@@ -4,26 +4,38 @@ import subprocess
 import datetime
 import smtplib
 from email.message import EmailMessage
+from email.utils import formatdate, make_msgid
+
 import boto3
 from boto3.s3.transfer import TransferConfig
 
 # =========================
-# ENV CONFIG
+# SAFE ENV LOADER
 # =========================
 
-EMAIL_SENDER = os.environ["EMAIL_SENDER"].strip()
-EMAIL_PASSWORD = os.environ["EMAIL_PASSWORD"].strip()
-EMAIL_RECEIVER = os.environ["EMAIL_RECEIVER"].strip()
+def env(name):
+    value = os.getenv(name)
+    if not value:
+        raise RuntimeError(f"❌ Missing environment variable: {name}")
+    return value.strip()
 
-R2_ACCOUNT_ID = os.environ["R2_ACCOUNT_ID"].strip()
-R2_ACCESS_KEY = os.environ["R2_ACCESS_KEY"].strip()
-R2_SECRET_KEY = os.environ["R2_SECRET_KEY"].strip()
+# =========================
+# CONFIG
+# =========================
 
-R2_BUCKET = "ig-reels"
+EMAIL_SENDER   = env("EMAIL_SENDER")
+EMAIL_PASSWORD = env("EMAIL_PASSWORD")
+EMAIL_RECEIVER = env("EMAIL_RECEIVER")
+
+R2_ACCOUNT_ID  = env("R2_ACCOUNT_ID")
+R2_ACCESS_KEY = env("R2_ACCESS_KEY")
+R2_SECRET_KEY = env("R2_SECRET_KEY")
+
+R2_BUCKET   = "ig-reels"
 R2_ENDPOINT = f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
 
 IMAGES_DIR = "images/sleep"
-AUDIO_DIR = "audio/sleep"
+AUDIO_DIR  = "audio"
 OUTPUT_DIR = "output"
 
 TODAY = datetime.date.today().isoformat()
@@ -33,22 +45,31 @@ TODAY = datetime.date.today().isoformat()
 # =========================
 
 def get_random_file(folder, extensions):
+    if not os.path.exists(folder):
+        raise RuntimeError(f"❌ Folder not found: {folder}")
+
     files = [
         os.path.join(folder, f)
         for f in os.listdir(folder)
         if f.lower().endswith(extensions)
     ]
+
     if not files:
-        raise RuntimeError(f"No valid files found in {folder}")
+        raise RuntimeError(f"❌ No valid files in {folder}")
+
     return random.choice(files)
 
+# =========================
+# AI CAPTION (SAFE)
+# =========================
+
 def generate_ai_caption():
+    print("🧠 Generating AI caption...")
+
     try:
         from openai import OpenAI
 
-        client = OpenAI(
-            api_key=os.environ["OPENAI_API_KEY"].strip()
-        )
+        client = OpenAI(api_key=env("OPENAI_API_KEY"))
 
         prompt = (
             "Write a calm, soothing Instagram caption for a meditation or sleep music reel. "
@@ -67,13 +88,12 @@ def generate_ai_caption():
         )
 
         caption = response.choices[0].message.content.strip()
-        print("🧠 AI caption generated")
+        print("✅ AI caption generated")
         return caption
 
     except Exception as e:
-        print("⚠️ AI caption failed, using fallback:", e)
-        return "Take a deep breath and let this moment of calm flow through you. 🌿✨ #Relax #Calm"
-
+        print("⚠️ AI failed, using fallback:", e)
+        return "Take a deep breath and let this moment of calm flow through you. 🌿✨ #Relax #Calm #Peace"
 
 # =========================
 # CREATE REEL
@@ -81,6 +101,7 @@ def generate_ai_caption():
 
 def create_reel():
     print("🎬 Creating reel...")
+
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     image = get_random_file(IMAGES_DIR, (".jpg", ".jpeg", ".png"))
@@ -108,7 +129,7 @@ def create_reel():
     return output_path
 
 # =========================
-# UPLOAD TO R2
+# UPLOAD TO R2 (PRESIGNED)
 # =========================
 
 def upload_to_r2(file_path):
@@ -125,40 +146,45 @@ def upload_to_r2(file_path):
 
     object_key = f"reel_{TODAY}.mp4"
 
-    # Upload (private)
     s3.upload_file(
         file_path,
         R2_BUCKET,
         object_key,
         ExtraArgs={"ContentType": "video/mp4"},
+        Config=TransferConfig(
+            multipart_threshold=1024 * 1024 * 1024,
+            use_threads=False
+        )
     )
 
-    # ✅ Generate pre-signed download URL (24 hours)
     signed_url = s3.generate_presigned_url(
-        ClientMethod="get_object",
+        "get_object",
         Params={
             "Bucket": R2_BUCKET,
             "Key": object_key,
             "ResponseContentType": "video/mp4",
-            "ResponseContentDisposition": f'attachment; filename="{object_key}"',
+            "ResponseContentDisposition": f'attachment; filename="{object_key}"'
         },
-        ExpiresIn=60 * 60 * 24,  # 24 hours
+        ExpiresIn=60 * 60 * 24  # 24 hours
     )
 
     print("✅ Pre-signed download link generated")
     return signed_url
 
 # =========================
-# SEND EMAIL
+# SEND EMAIL (ROBUST)
 # =========================
 
 def send_email(video_url, caption):
+    print("🚨 ENTERED send_email()")
     print("📧 Sending email...")
 
     msg = EmailMessage()
     msg["Subject"] = "🎥 Daily Instagram Reel Ready"
     msg["From"] = EMAIL_SENDER
     msg["To"] = EMAIL_RECEIVER
+    msg["Date"] = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid()
 
     msg.set_content(
         f"""Your daily reel is ready 🎉
@@ -173,13 +199,13 @@ Have a peaceful day 🙏
 """
     )
 
+    print("🚨 CONNECTING TO GMAIL SMTP")
+
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
         smtp.login(EMAIL_SENDER, EMAIL_PASSWORD)
         smtp.send_message(msg)
 
     print("✅ Email sent")
-
-
 
 # =========================
 # CLEANUP
@@ -199,19 +225,13 @@ def main():
     print("▶️ MAIN STARTED")
 
     video = create_reel()
-    print("▶️ VIDEO CREATED")
-
     link = upload_to_r2(video)
-    print("▶️ UPLOADED, LINK:", link)
-
     caption = generate_ai_caption()
-    print("▶️ CAPTION:", caption)
 
     send_email(link, caption)
-    print("▶️ EMAIL FUNCTION CALLED")
-
     cleanup()
-    print("▶️ CLEANUP DONE")
 
+    print("🎉 WORKFLOW COMPLETED SUCCESSFULLY")
 
-
+if __name__ == "__main__":
+    main()
