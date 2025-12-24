@@ -180,6 +180,7 @@ Have a peaceful day 🙏
     print("✅ Email sent")
 
 
+
 # =========================
 # CLEANUP
 # =========================
@@ -195,12 +196,22 @@ def cleanup():
 # =========================
 
 def main():
+    print("▶️ MAIN STARTED")
+
     video = create_reel()
+    print("▶️ VIDEO CREATED")
+
     link = upload_to_r2(video)
+    print("▶️ UPLOADED, LINK:", link)
 
     caption = generate_ai_caption()
+    print("▶️ CAPTION:", caption)
 
     send_email(link, caption)
+    print("▶️ EMAIL FUNCTION CALLED")
+
     cleanup()
+    print("▶️ CLEANUP DONE")
+
 
 
