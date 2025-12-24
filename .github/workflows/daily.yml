@@ -1,8 +1,8 @@
-name: Daily Instagram Reel
+name: Daily Insight Timer Reel
 
 on:
   schedule:
-    - cron: "0 9 * * *"   # 9 AM UTC daily
+    - cron: "0 9 * * *"
   workflow_dispatch:
 
 jobs:
@@ -24,7 +24,10 @@ jobs:
 
       - name: Run automation
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          IG_USER_ID: ${{ secrets.IG_USER_ID }}
-          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_RECEIVER: ${{ secrets.EMAIL_RECEIVER }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY }}
+          R2_SECRET_KEY: ${{ secrets.R2_SECRET_KEY }}
         run: python daily_insight_timer.py
