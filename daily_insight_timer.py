@@ -87,26 +87,33 @@ def upload_to_r2(file_path):
         aws_access_key_id=R2_ACCESS_KEY,
         aws_secret_access_key=R2_SECRET_KEY,
         region_name="auto",
+        config=boto3.session.Config(signature_version="s3v4"),
     )
 
     object_key = f"reel_{TODAY}.mp4"
 
-    config = TransferConfig(
-        multipart_threshold=1024 * 1024 * 1024,
-        use_threads=False
-    )
-
+    # Upload (private)
     s3.upload_file(
         file_path,
         R2_BUCKET,
         object_key,
         ExtraArgs={"ContentType": "video/mp4"},
-        Config=config
     )
 
-    download_url = f"{R2_ENDPOINT}/{R2_BUCKET}/{object_key}"
-    print("✅ Uploaded:", download_url)
-    return download_url
+    # ✅ Generate pre-signed download URL (24 hours)
+    signed_url = s3.generate_presigned_url(
+        ClientMethod="get_object",
+        Params={
+            "Bucket": R2_BUCKET,
+            "Key": object_key,
+            "ResponseContentType": "video/mp4",
+            "ResponseContentDisposition": f'attachment; filename="{object_key}"',
+        },
+        ExpiresIn=60 * 60 * 24,  # 24 hours
+    )
+
+    print("✅ Pre-signed download link generated")
+    return signed_url
 
 # =========================
 # SEND EMAIL
