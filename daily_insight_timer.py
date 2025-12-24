@@ -22,8 +22,8 @@ R2_SECRET_KEY = os.environ["R2_SECRET_KEY"].strip()
 R2_BUCKET = "ig-reels"
 R2_ENDPOINT = f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
 
-IMAGES_DIR = "images"
-AUDIO_DIR = "audio"
+IMAGES_DIR = "images/sleep"
+AUDIO_DIR = "audio/sleep"
 OUTPUT_DIR = "output"
 
 TODAY = datetime.date.today().isoformat()
