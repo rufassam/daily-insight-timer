@@ -123,6 +123,7 @@ def upload_to_r2(file_path):
 
     public_url = f"{R2_PUBLIC_BASE}/{object_key}"
     print("✅ Uploaded:", public_url)
+    print("📎 FINAL VIDEO LINK:", public_url)
 
     return public_url
 
