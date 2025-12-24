@@ -35,7 +35,7 @@ R2_BUCKET   = "ig-reels"
 R2_ENDPOINT = f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
 
 IMAGES_DIR = "images/sleep"
-AUDIO_DIR  = "audio/sleep"
+AUDIO_DIR  = "audio"
 OUTPUT_DIR = "output"
 
 TODAY = datetime.date.today().isoformat()
@@ -172,11 +172,52 @@ def upload_to_r2(file_path):
     return signed_url
 
 # =========================
-# SEND EMAIL (ROBUST)
+# AUTO-CLEAN OLD R2 FILES
+# =========================
+
+def cleanup_old_r2_files(days_to_keep=30):
+    print(f"🧹 Cleaning R2 files older than {days_to_keep} days...")
+
+    s3 = boto3.client(
+        "s3",
+        endpoint_url=R2_ENDPOINT,
+        aws_access_key_id=R2_ACCESS_KEY,
+        aws_secret_access_key=R2_SECRET_KEY,
+        region_name="auto",
+        config=boto3.session.Config(signature_version="s3v4"),
+    )
+
+    cutoff_date = datetime.date.today() - datetime.timedelta(days=days_to_keep)
+
+    response = s3.list_objects_v2(Bucket=R2_BUCKET)
+    if "Contents" not in response:
+        print("🧹 No files to clean")
+        return
+
+    for obj in response["Contents"]:
+        key = obj["Key"]
+
+        if not key.startswith("reel_"):
+            continue
+
+        try:
+            date_part = key.replace("reel_", "").replace(".mp4", "")
+            file_date = datetime.datetime.strptime(date_part, "%Y-%m-%d").date()
+        except Exception:
+            print(f"⚠️ Skipping unknown file: {key}")
+            continue
+
+        if file_date < cutoff_date:
+            print(f"🗑 Deleting old R2 file: {key}")
+            s3.delete_object(Bucket=R2_BUCKET, Key=key)
+
+    print("🧹 R2 cleanup completed")
+
+# =========================
+# SEND EMAIL
 # =========================
 
 def send_email(video_url, caption):
-    print("🚨 ENTERED send_email()")
     print("📧 Sending email...")
 
     msg = EmailMessage()
@@ -199,8 +240,6 @@ Have a peaceful day 🙏
 """
     )
 
-    print("🚨 CONNECTING TO GMAIL SMTP")
-
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
         smtp.login(EMAIL_SENDER, EMAIL_PASSWORD)
         smtp.send_message(msg)
@@ -208,14 +247,14 @@ Have a peaceful day 🙏
     print("✅ Email sent")
 
 # =========================
-# CLEANUP
+# LOCAL CLEANUP
 # =========================
 
 def cleanup():
     if os.path.exists(OUTPUT_DIR):
         for f in os.listdir(OUTPUT_DIR):
             os.remove(os.path.join(OUTPUT_DIR, f))
-        print("🧹 Cleanup done")
+        print("🧹 Local cleanup done")
 
 # =========================
 # MAIN
@@ -229,6 +268,8 @@ def main():
     caption = generate_ai_caption()
 
     send_email(link, caption)
+
+    cleanup_old_r2_files(days_to_keep=30)  # 🔥 CHANGE DAYS IF NEEDED
     cleanup()
 
     print("🎉 WORKFLOW COMPLETED SUCCESSFULLY")
