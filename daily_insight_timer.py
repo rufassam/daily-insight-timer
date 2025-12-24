@@ -175,7 +175,7 @@ def upload_to_r2(file_path):
 # AUTO-CLEAN OLD R2 FILES
 # =========================
 
-def cleanup_old_r2_files(days_to_keep=30):
+def cleanup_old_r2_files(days_to_keep=7):
     print(f"🧹 Cleaning R2 files older than {days_to_keep} days...")
 
     s3 = boto3.client(
