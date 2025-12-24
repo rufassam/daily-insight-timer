@@ -42,6 +42,39 @@ def get_random_file(folder, extensions):
         raise RuntimeError(f"No valid files found in {folder}")
     return random.choice(files)
 
+def generate_ai_caption():
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(
+            api_key=os.environ["OPENAI_API_KEY"].strip()
+        )
+
+        prompt = (
+            "Write a calm, soothing Instagram caption for a meditation or sleep music reel. "
+            "Keep it short (2–3 lines), peaceful, and inspiring. "
+            "Add 2–3 gentle hashtags."
+        )
+
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a mindfulness and meditation content creator."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=80,
+        )
+
+        caption = response.choices[0].message.content.strip()
+        print("🧠 AI caption generated")
+        return caption
+
+    except Exception as e:
+        print("⚠️ AI caption failed, using fallback:", e)
+        return "Take a deep breath and let this moment of calm flow through you. 🌿✨ #Relax #Calm"
+
+
 # =========================
 # CREATE REEL
 # =========================
@@ -119,7 +152,7 @@ def upload_to_r2(file_path):
 # SEND EMAIL
 # =========================
 
-def send_email(video_url):
+def send_email(video_url, caption):
     print("📧 Sending email...")
 
     msg = EmailMessage()
@@ -127,23 +160,25 @@ def send_email(video_url):
     msg["From"] = EMAIL_SENDER
     msg["To"] = EMAIL_RECEIVER
 
-    msg.set_content(f"""
-Your daily reel is ready 🎉
+    msg.set_content(
+        f"""Your daily reel is ready 🎉
 
-Download link:
+📥 Download link:
 {video_url}
 
-Suggested caption:
-Take a deep breath and let this moment flow. 🌿✨
+📝 Suggested caption:
+{caption}
 
 Have a peaceful day 🙏
-""")
+"""
+    )
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
         smtp.login(EMAIL_SENDER, EMAIL_PASSWORD)
         smtp.send_message(msg)
 
     print("✅ Email sent")
+
 
 # =========================
 # CLEANUP
@@ -162,9 +197,10 @@ def cleanup():
 def main():
     video = create_reel()
     link = upload_to_r2(video)
-    send_email(link)
+
+    caption = generate_ai_caption()
+
+    send_email(link, caption)
     cleanup()
 
-if __name__ == "__main__":
-    main()
 
