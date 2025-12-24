@@ -91,26 +91,67 @@ def generate_caption():
 # UPLOAD TO INSTAGRAM
 # =========================
 
-def upload_to_instagram(video_path, caption):
-    print("📤 Uploading to Instagram...")
+def upload_video_to_github(video_path):
+    print("☁️ Uploading to GitHub Releases...")
 
-    # Step 1: Create media container
-    with open(video_path, "rb") as f:
+    repo = "rufassam/daily-insight-timer"
+    token = os.environ["GITHUB_TOKEN"]
+
+    tag = f"reel-{TODAY}"
+    release_url = f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+    }
+
+    # Create release if not exists
+    r = requests.get(release_url, headers=headers)
+    if r.status_code == 404:
         r = requests.post(
-            f"https://graph.facebook.com/v19.0/{IG_USER_ID}/media",
-            data={
-                "media_type": "REELS",
-                "caption": caption,
-                "access_token": IG_ACCESS_TOKEN,
+            f"https://api.github.com/repos/{repo}/releases",
+            headers=headers,
+            json={"tag_name": tag, "name": tag},
+        )
+    release = r.json()
+
+    upload_url = release["upload_url"].split("{")[0]
+    filename = os.path.basename(video_path)
+
+    with open(video_path, "rb") as f:
+        requests.post(
+            f"{upload_url}?name={filename}",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "video/mp4",
             },
-            files={"video_file": f},
-            timeout=60,
+            data=f,
         )
 
-    r.raise_for_status()
+    public_url = f"https://github.com/{repo}/releases/download/{tag}/{filename}"
+    print("✅ Public video URL:", public_url)
+    return public_url
+
+def upload_to_instagram(video_url, caption):
+    print("📤 Uploading to Instagram...")
+
+    r = requests.post(
+        f"https://graph.facebook.com/v19.0/{IG_USER_ID}/media",
+        data={
+            "media_type": "REELS",
+            "video_url": video_url,
+            "caption": caption,
+            "access_token": IG_ACCESS_TOKEN,
+        },
+        timeout=60,
+    )
+
+    if r.status_code != 200:
+        print(r.text)
+        r.raise_for_status()
+
     creation_id = r.json()["id"]
 
-    # Step 2: Publish
     r = requests.post(
         f"https://graph.facebook.com/v19.0/{IG_USER_ID}/media_publish",
         data={
@@ -121,7 +162,8 @@ def upload_to_instagram(video_path, caption):
     )
 
     r.raise_for_status()
-    print("✅ Reel published on Instagram!")
+    print("✅ Reel published successfully!")
+
 
 # =========================
 # MAIN
@@ -130,7 +172,6 @@ def upload_to_instagram(video_path, caption):
 def main():
     video = create_reel()
     caption = generate_caption()
-    upload_to_instagram(video, caption)
 
-if __name__ == "__main__":
-    main()
+    public_video_url = upload_video_to_github(video)
+    upload_to_instagram(public_video_url, caption)
