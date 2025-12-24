@@ -95,7 +95,7 @@ def upload_video_to_github(video_path):
     print("☁️ Uploading to GitHub Releases...")
 
     repo = "rufassam/daily-insight-timer"
-    token = os.environ["GITHUB_TOKEN"]
+    token = os.environ["GH_TOKEN"]
 
     tag = f"reel-{TODAY}"
     release_url = f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
