@@ -133,7 +133,7 @@ def upload_video_to_github(video_path):
     return public_url
 
 def upload_to_instagram(video_url, caption):
-    print("📤 Uploading to Instagram...")
+    print("📤 Creating Instagram media container...")
 
     r = requests.post(
         f"https://graph.facebook.com/v19.0/{IG_USER_ID}/media",
@@ -145,24 +145,46 @@ def upload_to_instagram(video_url, caption):
         },
         timeout=60,
     )
+    r.raise_for_status()
 
-    if r.status_code != 200:
-        print(r.text)
-        r.raise_for_status()
+    container_id = r.json()["id"]
+    print("🧩 Container ID:", container_id)
 
-    creation_id = r.json()["id"]
+    # ⏳ WAIT until Instagram finishes processing
+    print("⏳ Waiting for Instagram processing...")
+    status = "IN_PROGRESS"
 
-    r = requests.post(
+    while status != "FINISHED":
+        time.sleep(10)
+        s = requests.get(
+            f"https://graph.facebook.com/v19.0/{container_id}",
+            params={
+                "fields": "status_code",
+                "access_token": IG_ACCESS_TOKEN,
+            },
+            timeout=30,
+        )
+        s.raise_for_status()
+        status = s.json()["status_code"]
+        print("📦 Status:", status)
+
+        if status == "ERROR":
+            raise RuntimeError("❌ Instagram failed to process the video")
+
+    # 🚀 NOW publish
+    print("🚀 Publishing reel...")
+    p = requests.post(
         f"https://graph.facebook.com/v19.0/{IG_USER_ID}/media_publish",
         data={
-            "creation_id": creation_id,
+            "creation_id": container_id,
             "access_token": IG_ACCESS_TOKEN,
         },
         timeout=30,
     )
+    p.raise_for_status()
 
-    r.raise_for_status()
-    print("✅ Reel published successfully!")
+    print("✅ Reel successfully published on Instagram!")
+
 
 
 # =========================
