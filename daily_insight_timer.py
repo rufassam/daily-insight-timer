@@ -1,75 +1,50 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Sat Dec 20 13:39:15 2025
-
-@author: rufassamjebakumar
-"""
-
 import os
 import random
 import subprocess
 import datetime
-import smtplib
-from email.message import EmailMessage
-import boto3
-from boto3.s3.transfer import TransferConfig
+import requests
+from openai import OpenAI
 
 # =========================
-# CONFIG — ENV VARS
+# CONFIG
 # =========================
 
-# Email
-EMAIL_SENDER = os.environ["EMAIL_SENDER"].strip()
-EMAIL_PASSWORD = os.environ["EMAIL_PASSWORD"].strip()
-EMAIL_RECEIVER = os.environ["EMAIL_RECEIVER"].strip()
-
-# Cloudflare R2
-R2_ACCOUNT_ID = os.environ["R2_ACCOUNT_ID"].strip()
-R2_ACCESS_KEY = os.environ["R2_ACCESS_KEY"].strip()
-R2_SECRET_KEY = os.environ["R2_SECRET_KEY"].strip()
-
-R2_BUCKET = "ig-reels"
-
-# R2 endpoint (REQUIRED)
-R2_ENDPOINT = f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-
-# Public Worker URL (WORKING)
-R2_PUBLIC_BASE = "https://ig-reels-public.rufassam.workers.dev"
-
-# Media folders
 IMAGES_DIR = "images"
 AUDIO_DIR = "audio"
 OUTPUT_DIR = "output"
 
 TODAY = datetime.date.today().isoformat()
 
+OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
+IG_USER_ID = os.environ["IG_USER_ID"]
+IG_ACCESS_TOKEN = os.environ["IG_ACCESS_TOKEN"]
+
 # =========================
 # HELPERS
 # =========================
 
-def get_random_file(root_dir, extensions):
+def get_random_file(root, extensions):
     files = []
-    for root, _, filenames in os.walk(root_dir):
-        for f in filenames:
+    for r, _, fns in os.walk(root):
+        for f in fns:
             if f.lower().endswith(extensions):
-                files.append(os.path.join(root, f))
-
+                files.append(os.path.join(r, f))
     if not files:
-        raise RuntimeError(f"❌ No valid files found in {root_dir}")
-
+        raise RuntimeError(f"No files in {root}")
     return random.choice(files)
 
+# =========================
+# CREATE REEL
+# =========================
 
 def create_reel():
     print("🎬 Creating reel...")
-
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    image = get_random_file(IMAGES_DIR, (".jpg", ".jpeg", ".png"))
+    image = get_random_file(IMAGES_DIR, (".jpg", ".png", ".jpeg"))
     audio = get_random_file(AUDIO_DIR, (".mp3", ".wav", ".m4a"))
 
-    output_path = f"{OUTPUT_DIR}/reel_{TODAY}.mp4"
+    output = f"{OUTPUT_DIR}/reel_{TODAY}.mp4"
 
     cmd = [
         "ffmpeg",
@@ -83,89 +58,79 @@ def create_reel():
         "-c:a", "aac",
         "-b:a", "192k",
         "-shortest",
-        output_path,
+        output,
     ]
 
     subprocess.run(cmd, check=True)
-    print("✅ Reel created:", output_path)
+    print("✅ Reel created:", output)
+    return output
 
-    return output_path
+# =========================
+# AI CAPTION
+# =========================
 
+def generate_caption():
+    print("🧠 Generating AI caption...")
+    client = OpenAI(api_key=OPENAI_API_KEY)
 
-def upload_to_r2(file_path):
-    print("☁️ Uploading to R2...")
-
-    s3 = boto3.client(
-        "s3",
-        endpoint_url=R2_ENDPOINT,
-        aws_access_key_id=R2_ACCESS_KEY,
-        aws_secret_access_key=R2_SECRET_KEY,
-        region_name="auto",
-        config=boto3.session.Config(signature_version="s3v4"),
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "You create calm Instagram captions for meditation reels."},
+            {"role": "user", "content": "Write a peaceful, short Instagram Reel caption with 2–3 hashtags."}
+        ],
+        max_tokens=80,
+        temperature=0.7,
     )
 
-    object_key = f"reel_{TODAY}.mp4"
+    caption = response.choices[0].message.content.strip()
+    print("✅ Caption:", caption)
+    return caption
 
-    # 🚫 Disable multipart uploads (R2 FIX)
-    config = TransferConfig(
-        multipart_threshold=1024 * 1024 * 1024,
-        multipart_chunksize=1024 * 1024 * 1024,
-        use_threads=False,
+# =========================
+# UPLOAD TO INSTAGRAM
+# =========================
+
+def upload_to_instagram(video_path, caption):
+    print("📤 Uploading to Instagram...")
+
+    # Step 1: Create media container
+    with open(video_path, "rb") as f:
+        r = requests.post(
+            f"https://graph.facebook.com/v19.0/{IG_USER_ID}/media",
+            data={
+                "media_type": "REELS",
+                "caption": caption,
+                "access_token": IG_ACCESS_TOKEN,
+            },
+            files={"video_file": f},
+            timeout=60,
+        )
+
+    r.raise_for_status()
+    creation_id = r.json()["id"]
+
+    # Step 2: Publish
+    r = requests.post(
+        f"https://graph.facebook.com/v19.0/{IG_USER_ID}/media_publish",
+        data={
+            "creation_id": creation_id,
+            "access_token": IG_ACCESS_TOKEN,
+        },
+        timeout=30,
     )
 
-    s3.upload_file(
-        file_path,
-        R2_BUCKET,
-        object_key,
-        ExtraArgs={"ContentType": "video/mp4"},
-        Config=config,
-    )
+    r.raise_for_status()
+    print("✅ Reel published on Instagram!")
 
-    public_url = f"{R2_PUBLIC_BASE}/{object_key}"
-    print("✅ Uploaded:", public_url)
-    print("📎 FINAL VIDEO LINK:", public_url)
-
-    return public_url
-
-
-def send_email(video_url):
-    print("📧 Sending email...")
-
-    msg = EmailMessage()
-    msg["Subject"] = "🎥 Daily Insight Timer Reel"
-    msg["From"] = EMAIL_SENDER
-    msg["To"] = EMAIL_RECEIVER
-
-    msg.set_content(
-        f"""Your daily reel is ready 🎉
-
-Watch & download here:
-{video_url}
-
-Have a great day 🙏
-"""
-    )
-
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
-        smtp.login(EMAIL_SENDER, EMAIL_PASSWORD)
-        smtp.send_message(msg)
-
-    print("✅ Email sent!")
-
-
-def cleanup_local_files():
-    if os.path.exists(OUTPUT_DIR):
-        for f in os.listdir(OUTPUT_DIR):
-            os.remove(os.path.join(OUTPUT_DIR, f))
-        print("🧹 Local cleanup done")
-
+# =========================
+# MAIN
+# =========================
 
 def main():
-    video_path = create_reel()
-    public_url = upload_to_r2(video_path)
-    send_email(public_url)
-    cleanup_local_files()
-
+    video = create_reel()
+    caption = generate_caption()
+    upload_to_instagram(video, caption)
 
 if __name__ == "__main__":
     main()
