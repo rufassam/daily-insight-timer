@@ -1,4 +1,7 @@
+#!/usr/bin/env python3
+
 import os
+import json
 import random
 import subprocess
 import datetime
@@ -12,7 +15,6 @@ from boto3.s3.transfer import TransferConfig
 # =========================
 # SAFE ENV LOADER
 # =========================
-
 def env(name):
     value = os.getenv(name)
     if not value:
@@ -28,8 +30,8 @@ EMAIL_PASSWORD = env("EMAIL_PASSWORD")
 EMAIL_RECEIVER = env("EMAIL_RECEIVER")
 
 R2_ACCOUNT_ID  = env("R2_ACCOUNT_ID")
-R2_ACCESS_KEY = env("R2_ACCESS_KEY")
-R2_SECRET_KEY = env("R2_SECRET_KEY")
+R2_ACCESS_KEY  = env("R2_ACCESS_KEY")
+R2_SECRET_KEY  = env("R2_SECRET_KEY")
 
 R2_BUCKET   = "ig-reels"
 R2_ENDPOINT = f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
@@ -40,47 +42,50 @@ OUTPUT_DIR = "output"
 
 TODAY = datetime.date.today().isoformat()
 
-# =========================
-# HELPERS
-# =========================
+LOW_STOCK_THRESHOLD = 3   # warn when < 10 days left
 
-def get_random_file(folder, extensions):
-    if not os.path.exists(folder):
-        raise RuntimeError(f"❌ Folder not found: {folder}")
+HISTORY_FILE = ".history.json"
 
-    files = [
-        os.path.join(folder, f)
-        for f in os.listdir(folder)
-        if f.lower().endswith(extensions)
-    ]
-
-    if not files:
-        raise RuntimeError(f"❌ No valid files in {folder}")
-
-    return random.choice(files)
 
 # =========================
-# AI CAPTION (SAFE)
+# HISTORY HELPERS
 # =========================
 
+def load_history():
+    if not os.path.exists(HISTORY_FILE):
+        return {
+            "index": 0,
+            "shuffle_seed": None
+        }
+
+    with open(HISTORY_FILE, "r") as f:
+        return json.load(f)
+
+
+def save_history(history):
+    with open(HISTORY_FILE, "w") as f:
+        json.dump(history, f, indent=2)
+
+
+# =========================
+# AI CAPTION
+# =========================
 def generate_ai_caption():
     print("🧠 Generating AI caption...")
 
     try:
         from openai import OpenAI
-
         client = OpenAI(api_key=env("OPENAI_API_KEY"))
 
         prompt = (
-            "Write a calm, soothing Instagram caption for a meditation or sleep music reel. "
-            "Keep it short (2–3 lines), peaceful, and inspiring. "
-            "Add 2–3 gentle hashtags."
+            "Write a calm meditation/sleep Instagram caption. "
+            "2–3 lines. Gentle tone. Add 2–3 soft hashtags."
         )
 
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are a mindfulness and meditation content creator."},
+                {"role": "system", "content": "You write peaceful meditation captions."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.7,
@@ -88,12 +93,13 @@ def generate_ai_caption():
         )
 
         caption = response.choices[0].message.content.strip()
-        print("✅ AI caption generated")
+        print("✅ Caption created")
         return caption
 
     except Exception as e:
-        print("⚠️ AI failed, using fallback:", e)
-        return "Take a deep breath and let this moment of calm flow through you. 🌿✨ #Relax #Calm #Peace"
+        print("⚠️ AI failed, fallback:", e)
+        return "Take a deep breath… let your body unwind. 🌿✨ #Calm #Stillness"
+
 
 # =========================
 # CREATE REEL
@@ -104,8 +110,53 @@ def create_reel():
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    image = get_random_file(IMAGES_DIR, (".jpg", ".jpeg", ".png"))
-    audio = get_random_file(AUDIO_DIR, (".mp3", ".wav", ".m4a"))
+    images = sorted([
+        os.path.join(IMAGES_DIR, f)
+        for f in os.listdir(IMAGES_DIR)
+        if f.lower().endswith((".jpg", ".jpeg", ".png"))
+    ])
+
+    audios = sorted([
+        os.path.join(AUDIO_DIR, f)
+        for f in os.listdir(AUDIO_DIR)
+        if f.lower().endswith((".mp3", ".wav", ".m4a"))
+    ])
+
+    if not images or not audios:
+        raise RuntimeError("❌ Images or audio missing")
+
+    total_pairs = min(len(images), len(audios))
+
+    history = load_history()
+
+    # create shuffle order once
+    if history["shuffle_seed"] is None:
+        history["shuffle_seed"] = random.randint(1, 999999)
+        save_history(history)
+
+    random.seed(history["shuffle_seed"])
+    shuffled_indices = list(range(total_pairs))
+    random.shuffle(shuffled_indices)
+
+    i = history["index"]
+
+    if i >= total_pairs:
+        raise RuntimeError("🚫 No unused files left — upload more")
+
+    pair_index = shuffled_indices[i]
+
+    image = images[pair_index]
+    audio = audios[pair_index]
+
+    history["index"] = i + 1
+    save_history(history)
+
+    remaining = total_pairs - history["index"]
+    if remaining <= LOW_STOCK_THRESHOLD:
+        try:
+            send_low_stock_alert(remaining)
+        except Exception as e:
+            print("⚠️ Low stock alert failed:", e)
 
     output_path = f"{OUTPUT_DIR}/reel_{TODAY}.mp4"
 
@@ -121,19 +172,21 @@ def create_reel():
         "-c:a", "aac",
         "-b:a", "192k",
         "-shortest",
-        output_path
+        output_path,
     ]
 
     subprocess.run(cmd, check=True)
+
     print("✅ Reel created:", output_path)
-    return output_path
+    return output_path, os.path.basename(image), os.path.basename(audio)
+
 
 # =========================
-# UPLOAD TO R2 (PRESIGNED)
+# UPLOAD TO R2
 # =========================
 
 def upload_to_r2(file_path):
-    print("☁️ Uploading to R2...")
+    print("☁️ Uploading…")
 
     s3 = boto3.client(
         "s3",
@@ -157,7 +210,7 @@ def upload_to_r2(file_path):
         )
     )
 
-    signed_url = s3.generate_presigned_url(
+    url = s3.generate_presigned_url(
         "get_object",
         Params={
             "Bucket": R2_BUCKET,
@@ -165,61 +218,44 @@ def upload_to_r2(file_path):
             "ResponseContentType": "video/mp4",
             "ResponseContentDisposition": f'attachment; filename="{object_key}"'
         },
-        ExpiresIn=60 * 60 * 24  # 24 hours
+        ExpiresIn=86400
     )
 
-    print("✅ Pre-signed download link generated")
-    return signed_url
+    print("✅ Link ready")
+    return url
+
 
 # =========================
-# AUTO-CLEAN OLD R2 FILES
+# EMAILS
 # =========================
 
-def cleanup_old_r2_files(days_to_keep=7):
-    print(f"🧹 Cleaning R2 files older than {days_to_keep} days...")
+def send_low_stock_alert(remaining):
+    msg = EmailMessage()
+    msg["Subject"] = "⚠️ Reels automation — content running low"
+    msg["From"] = EMAIL_SENDER
+    msg["To"] = EMAIL_RECEIVER
 
-    s3 = boto3.client(
-        "s3",
-        endpoint_url=R2_ENDPOINT,
-        aws_access_key_id=R2_ACCESS_KEY,
-        aws_secret_access_key=R2_SECRET_KEY,
-        region_name="auto",
-        config=boto3.session.Config(signature_version="s3v4"),
+    msg.set_content(
+f"""
+Only {remaining} reels remain.
+
+Upload more files here:
+
+📁 {IMAGES_DIR}
+📁 {AUDIO_DIR}
+
+– Automation bot
+"""
     )
 
-    cutoff_date = datetime.date.today() - datetime.timedelta(days=days_to_keep)
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+        smtp.login(EMAIL_SENDER, EMAIL_PASSWORD)
+        smtp.send_message(msg)
 
-    response = s3.list_objects_v2(Bucket=R2_BUCKET)
-    if "Contents" not in response:
-        print("🧹 No files to clean")
-        return
+    print("📩 Low-stock email sent")
 
-    for obj in response["Contents"]:
-        key = obj["Key"]
 
-        if not key.startswith("reel_"):
-            continue
-
-        try:
-            date_part = key.replace("reel_", "").replace(".mp4", "")
-            file_date = datetime.datetime.strptime(date_part, "%Y-%m-%d").date()
-        except Exception:
-            print(f"⚠️ Skipping unknown file: {key}")
-            continue
-
-        if file_date < cutoff_date:
-            print(f"🗑 Deleting old R2 file: {key}")
-            s3.delete_object(Bucket=R2_BUCKET, Key=key)
-
-    print("🧹 R2 cleanup completed")
-
-# =========================
-# SEND EMAIL
-# =========================
-
-def send_email(video_url, caption):
-    print("📧 Sending email...")
-
+def send_email(video_url, caption, image, audio):
     msg = EmailMessage()
     msg["Subject"] = "🎥 Daily Instagram Reel Ready"
     msg["From"] = EMAIL_SENDER
@@ -228,13 +264,18 @@ def send_email(video_url, caption):
     msg["Message-ID"] = make_msgid()
 
     msg.set_content(
-        f"""Your daily reel is ready 🎉
+f"""
+Your daily reel is ready 🎉
 
-📥 Download link:
+📥 Download:
 {video_url}
 
-📝 Suggested caption:
+📝 Caption suggestion:
 {caption}
+
+Today used:
+📸 {image}
+🎵 {audio}
 
 Have a peaceful day 🙏
 """
@@ -246,33 +287,68 @@ Have a peaceful day 🙏
 
     print("✅ Email sent")
 
+
 # =========================
-# LOCAL CLEANUP
+# CLEANUP
 # =========================
 
-def cleanup():
+def cleanup_local():
     if os.path.exists(OUTPUT_DIR):
         for f in os.listdir(OUTPUT_DIR):
             os.remove(os.path.join(OUTPUT_DIR, f))
         print("🧹 Local cleanup done")
+
+
+def cleanup_old_r2_files(days_to_keep=30):
+    s3 = boto3.client(
+        "s3",
+        endpoint_url=R2_ENDPOINT,
+        aws_access_key_id=R2_ACCESS_KEY,
+        aws_secret_access_key=R2_SECRET_KEY,
+        region_name="auto",
+        config=boto3.session.Config(signature_version="s3v4"),
+    )
+
+    cutoff = datetime.date.today() - datetime.timedelta(days=days_to_keep)
+
+    resp = s3.list_objects_v2(Bucket=R2_BUCKET)
+    if "Contents" not in resp:
+        return
+
+    for obj in resp["Contents"]:
+        key = obj["Key"]
+
+        if not key.startswith("reel_"):
+            continue
+
+        try:
+            d = key.replace("reel_", "").replace(".mp4", "")
+            file_date = datetime.datetime.strptime(d, "%Y-%m-%d").date()
+        except:
+            continue
+
+        if file_date < cutoff:
+            s3.delete_object(Bucket=R2_BUCKET, Key=key)
+
 
 # =========================
 # MAIN
 # =========================
 
 def main():
-    print("▶️ MAIN STARTED")
+    print("▶️ START")
 
-    video = create_reel()
-    link = upload_to_r2(video)
+    video, img, aud = create_reel()
+    url = upload_to_r2(video)
     caption = generate_ai_caption()
 
-    send_email(link, caption)
+    send_email(url, caption, img, aud)
 
-    cleanup_old_r2_files(days_to_keep=30)  # 🔥 CHANGE DAYS IF NEEDED
-    cleanup()
+    cleanup_old_r2_files()
+    cleanup_local()
 
-    print("🎉 WORKFLOW COMPLETED SUCCESSFULLY")
+    print("🎉 DONE")
+
 
 if __name__ == "__main__":
     main()
