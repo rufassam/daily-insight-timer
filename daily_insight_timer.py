@@ -12,6 +12,7 @@ from email.utils import formatdate, make_msgid
 import boto3
 from boto3.s3.transfer import TransferConfig
 
+
 # =========================
 # SAFE ENV LOADER
 # =========================
@@ -46,21 +47,19 @@ TODAY = datetime.date.today().isoformat()
 LOW_STOCK_THRESHOLD = 3
 HISTORY_FILE = ".history.json"
 
-# Reset flag
 RESET_PROGRESS = os.getenv("RESET_PROGRESS", "").lower() == "true"
 
 
 # =========================
-# HISTORY HELPERS
+# HISTORY
 # =========================
+
 def load_history():
     try:
         if not os.path.exists(HISTORY_FILE):
             return {"index": 0, "shuffle_seed": None}
-
         with open(HISTORY_FILE, "r") as f:
             return json.load(f)
-
     except Exception:
         return {"index": 0, "shuffle_seed": None}
 
@@ -72,21 +71,9 @@ def save_history(history):
 
 def reset_progress():
     print("🔄 Resetting progress…")
-
-    data = {
-        "index": 0,
-        "shuffle_seed": None
-    }
-
     with open(HISTORY_FILE, "w") as f:
-        json.dump(data, f, indent=2)
-
+        json.dump({"index": 0, "shuffle_seed": None}, f, indent=2)
     print("✅ Progress reset to Day 1")
-
-
-def get_day_number():
-    history = load_history()
-    return history.get("index", 0) + 1
 
 
 # =========================
@@ -119,10 +106,9 @@ def get_hashtags(theme):
 # =========================
 # AI CAPTION
 # =========================
-def generate_ai_caption():
+def generate_ai_caption(day):
     print("🧠 Generating AI caption...")
 
-    day = get_day_number()
     theme = pick_theme()
     tag_block = get_hashtags(theme)
 
@@ -144,13 +130,12 @@ Line 2 (calm reassurance)
 
 Final supportive sentence.
 
-Blank line.
-Then these hashtags:
+Blank line, then these hashtags:
 
 {tag_block}
 
-Keep tone peaceful and minimal.
-Do NOT exceed 6 total lines.
+Soft tone. Minimal words.
+Do NOT exceed 6 lines total.
 """
 
         response = client.chat.completions.create(
@@ -211,7 +196,6 @@ def create_reel():
         raise RuntimeError("❌ Images or audio missing")
 
     total_pairs = min(len(images), len(audios))
-
     history = load_history()
 
     if history["shuffle_seed"] is None:
@@ -230,10 +214,14 @@ def create_reel():
             "Add more images/audio to continue."
         )
 
+    # Day BEFORE increment
+    day_number = i + 1
+
     pair_index = shuffled_indices[i]
     image = images[pair_index]
     audio = audios[pair_index]
 
+    # increment after use
     history["index"] = i + 1
     save_history(history)
 
@@ -264,7 +252,8 @@ def create_reel():
     subprocess.run(cmd, check=True)
 
     print("✅ Reel created:", output_path)
-    return output_path, os.path.basename(image), os.path.basename(audio)
+
+    return output_path, os.path.basename(image), os.path.basename(audio), day_number
 
 
 # =========================
@@ -289,7 +278,10 @@ def upload_to_r2(file_path):
         R2_BUCKET,
         object_key,
         ExtraArgs={"ContentType": "video/mp4"},
-        Config=TransferConfig(multipart_threshold=1024 * 1024 * 1024, use_threads=False)
+        Config=TransferConfig(
+            multipart_threshold=1024 * 1024 * 1024,
+            use_threads=False
+        )
     )
 
     url = s3.generate_presigned_url(
@@ -321,7 +313,7 @@ def send_low_stock_alert(remaining):
 f"""
 Only {remaining} reels remain.
 
-Upload more files:
+Upload more:
 
 📁 {IMAGES_DIR}
 📁 {AUDIO_DIR}
@@ -418,9 +410,9 @@ def main():
     if RESET_PROGRESS:
         reset_progress()
 
-    video, img, aud = create_reel()
+    video, img, aud, day = create_reel()
     url = upload_to_r2(video)
-    caption = generate_ai_caption()
+    caption = generate_ai_caption(day)
 
     send_email(url, caption, img, aud)
 
@@ -432,3 +424,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
