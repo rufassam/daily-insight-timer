@@ -21,6 +21,7 @@ def env(name):
         raise RuntimeError(f"❌ Missing environment variable: {name}")
     return value.strip()
 
+
 # =========================
 # CONFIG
 # =========================
@@ -42,29 +43,77 @@ OUTPUT_DIR = "output"
 
 TODAY = datetime.date.today().isoformat()
 
-LOW_STOCK_THRESHOLD = 3   # warn when < 10 days left
-
+LOW_STOCK_THRESHOLD = 3
 HISTORY_FILE = ".history.json"
+
+# Reset flag
+RESET_PROGRESS = os.getenv("RESET_PROGRESS", "").lower() == "true"
 
 
 # =========================
 # HISTORY HELPERS
 # =========================
-
 def load_history():
-    if not os.path.exists(HISTORY_FILE):
-        return {
-            "index": 0,
-            "shuffle_seed": None
-        }
+    try:
+        if not os.path.exists(HISTORY_FILE):
+            return {"index": 0, "shuffle_seed": None}
 
-    with open(HISTORY_FILE, "r") as f:
-        return json.load(f)
+        with open(HISTORY_FILE, "r") as f:
+            return json.load(f)
+
+    except Exception:
+        return {"index": 0, "shuffle_seed": None}
 
 
 def save_history(history):
     with open(HISTORY_FILE, "w") as f:
         json.dump(history, f, indent=2)
+
+
+def reset_progress():
+    print("🔄 Resetting progress…")
+
+    data = {
+        "index": 0,
+        "shuffle_seed": None
+    }
+
+    with open(HISTORY_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+    print("✅ Progress reset to Day 1")
+
+
+def get_day_number():
+    history = load_history()
+    return history.get("index", 0) + 1
+
+
+# =========================
+# CAPTION THEMES + TAGS
+# =========================
+
+CAPTION_THEMES = ["sleep", "healing", "focus"]
+
+HASHTAGS = {
+    "sleep": """
+#sleepmusic #deeprest #calmnight #relaxingmusic #insomniarelief
+""",
+    "healing": """
+#healingjourney #innerpeace #calmingvibes #mentalwellness #selfhealing
+""",
+    "focus": """
+#focusmusic #studyvibes #concentration #productivityflow #mindfulworking
+"""
+}
+
+
+def pick_theme():
+    return random.choice(CAPTION_THEMES)
+
+
+def get_hashtags(theme):
+    return HASHTAGS.get(theme, "").strip()
 
 
 # =========================
@@ -73,38 +122,74 @@ def save_history(history):
 def generate_ai_caption():
     print("🧠 Generating AI caption...")
 
+    day = get_day_number()
+    theme = pick_theme()
+    tag_block = get_hashtags(theme)
+
     try:
         from openai import OpenAI
         client = OpenAI(api_key=env("OPENAI_API_KEY"))
 
-        prompt = (
-            "Write a calm meditation/sleep Instagram caption. "
-            "2–3 lines. Gentle tone. Add 2–3 soft hashtags."
-        )
+        prompt = f"""
+Write an Instagram caption for meditation music.
+
+STYLE RULES:
+• Theme: {theme}
+• Format EXACTLY like this:
+
+Day {day}/365 — "Short poetic title"
+
+Line 1 (soft emotion)
+Line 2 (calm reassurance)
+
+Final supportive sentence.
+
+Blank line.
+Then these hashtags:
+
+{tag_block}
+
+Keep tone peaceful and minimal.
+Do NOT exceed 6 total lines.
+"""
 
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You write peaceful meditation captions."},
+                {"role": "system", "content": "You write peaceful, minimal meditation captions."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.7,
-            max_tokens=80,
+            temperature=0.6,
+            max_tokens=150,
         )
 
         caption = response.choices[0].message.content.strip()
+        caption += "\n\n— Rufas Sam"
+
         print("✅ Caption created")
         return caption
 
     except Exception as e:
-        print("⚠️ AI failed, fallback:", e)
-        return "Take a deep breath… let your body unwind. 🌿✨ #Calm #Stillness"
+        print("⚠️ AI failed, fallback used:", e)
+
+        fallback = f"""
+Day {day}/365 — "Calm & Release"
+
+Close your eyes.
+Let your body soften.
+
+Save this for tonight 🌿
+
+#calm #peace #relaxation
+
+— Rufas Sam
+"""
+        return fallback.strip()
 
 
 # =========================
 # CREATE REEL
 # =========================
-
 def create_reel():
     print("🎬 Creating reel...")
 
@@ -129,7 +214,6 @@ def create_reel():
 
     history = load_history()
 
-    # create shuffle order once
     if history["shuffle_seed"] is None:
         history["shuffle_seed"] = random.randint(1, 999999)
         save_history(history)
@@ -141,10 +225,12 @@ def create_reel():
     i = history["index"]
 
     if i >= total_pairs:
-        raise RuntimeError("🚫 No unused files left — upload more")
+        raise RuntimeError(
+            "🚫 All reels finished.\n"
+            "Add more images/audio to continue."
+        )
 
     pair_index = shuffled_indices[i]
-
     image = images[pair_index]
     audio = audios[pair_index]
 
@@ -184,7 +270,6 @@ def create_reel():
 # =========================
 # UPLOAD TO R2
 # =========================
-
 def upload_to_r2(file_path):
     print("☁️ Uploading…")
 
@@ -204,10 +289,7 @@ def upload_to_r2(file_path):
         R2_BUCKET,
         object_key,
         ExtraArgs={"ContentType": "video/mp4"},
-        Config=TransferConfig(
-            multipart_threshold=1024 * 1024 * 1024,
-            use_threads=False
-        )
+        Config=TransferConfig(multipart_threshold=1024 * 1024 * 1024, use_threads=False)
     )
 
     url = s3.generate_presigned_url(
@@ -239,7 +321,7 @@ def send_low_stock_alert(remaining):
 f"""
 Only {remaining} reels remain.
 
-Upload more files here:
+Upload more files:
 
 📁 {IMAGES_DIR}
 📁 {AUDIO_DIR}
@@ -251,8 +333,6 @@ Upload more files here:
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
         smtp.login(EMAIL_SENDER, EMAIL_PASSWORD)
         smtp.send_message(msg)
-
-    print("📩 Low-stock email sent")
 
 
 def send_email(video_url, caption, image, audio):
@@ -296,7 +376,6 @@ def cleanup_local():
     if os.path.exists(OUTPUT_DIR):
         for f in os.listdir(OUTPUT_DIR):
             os.remove(os.path.join(OUTPUT_DIR, f))
-        print("🧹 Local cleanup done")
 
 
 def cleanup_old_r2_files(days_to_keep=30):
@@ -317,7 +396,6 @@ def cleanup_old_r2_files(days_to_keep=30):
 
     for obj in resp["Contents"]:
         key = obj["Key"]
-
         if not key.startswith("reel_"):
             continue
 
@@ -334,9 +412,11 @@ def cleanup_old_r2_files(days_to_keep=30):
 # =========================
 # MAIN
 # =========================
-
 def main():
     print("▶️ START")
+
+    if RESET_PROGRESS:
+        reset_progress()
 
     video, img, aud = create_reel()
     url = upload_to_r2(video)
