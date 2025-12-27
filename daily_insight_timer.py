@@ -47,7 +47,7 @@ TODAY = datetime.date.today().isoformat()
 LOW_STOCK_THRESHOLD = 3
 HISTORY_FILE = ".history.json"
 
-RESET_PROGRESS = os.getenv("RESET_PROGRESS", "").lower() == "true"
+RESET_PROGRESS = os.getenv("RESET_PROGRESS", "").lower() == "false"
 
 
 # =========================
