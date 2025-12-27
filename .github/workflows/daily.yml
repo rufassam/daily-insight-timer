@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "0 6 * * *"
   workflow_dispatch:
+    inputs:
+      reset:
+        description: "Reset to Day 1?"
+        required: false
+        default: "false"
 
 # allow workflow to push commits back
 permissions:
@@ -17,7 +22,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # important so git can commit/push
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -38,6 +43,7 @@ jobs:
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY }}
           R2_SECRET_KEY: ${{ secrets.R2_SECRET_KEY }}
+          RESET_PROGRESS: ${{ github.event.inputs.reset }}
         run: python daily_insight_timer.py
 
       - name: Commit updated history
@@ -47,7 +53,6 @@ jobs:
 
           git add .history.json || true
 
-          # commit only if changed
           git diff --cached --quiet || git commit -m "Update history file"
 
           git push
