@@ -45,9 +45,12 @@ OUTPUT_DIR = "output"
 TODAY = datetime.date.today().isoformat()
 
 LOW_STOCK_THRESHOLD = 3
-HISTORY_FILE = ".history.json"
+HISTORY_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    ".history.json"
+)
 
-RESET_PROGRESS = os.getenv("RESET_PROGRESS", "").lower() == "false"
+RESET_PROGRESS = os.getenv("RESET_PROGRESS", "").lower() == "true"
 
 
 # =========================
